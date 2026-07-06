@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Motorcycle Test Dashboard</title>
+</head>
+
+<body>
+
+    <h1>Motorcycle Telemetry</h1>
+
+    <h2 id="speed">Speed: --</h2>
+
+    <h2 id="accel">Acceleration: --</h2>
+
+    <h2 id="roll">Roll: --</h2>
+
+    <h2 id="yaw">Yaw: --</h2>
+
+    <h2 id="gps">GPS: --</h2>
+
+<script>
+
+const socket = new WebSocket(
+    "ws://localhost:8765"
+);
+
+socket.onopen = () => {
+
+    console.log("Connected");
+
+};
+
+socket.onmessage = (event) => {
+
+    const data = JSON.parse(
+        event.data
+    );
+
+    document.getElementById(
+        "speed"
+    ).innerText =
+        "Speed: " + data.speed;
+
+    document.getElementById(
+        "accel"
+    ).innerText =
+        "Acceleration: " + data.accel;
+
+    document.getElementById(
+        "roll"
+    ).innerText =
+        "Roll: " + data.roll;
+
+    document.getElementById(
+        "yaw"
+    ).innerText =
+        "Yaw: " + data.yaw;
+
+    document.getElementById(
+        "gps"
+    ).innerText =
+        "GPS: " +
+        data.lat +
+        ", " +
+        data.lon;
+
+};
+
+socket.onerror = (error) => {
+
+    console.log(error);
+
+};
+
+</script>
+
+</body>
+</html>
