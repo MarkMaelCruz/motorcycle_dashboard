@@ -1,26 +1,14 @@
-import asyncio
-import json
 import serial
-from websockets.asyncio.server import serve
+import requests
 
 SERIAL_PORT = "/dev/ttyACM0"
 BAUD_RATE = 115200
 
-clients = set()
+BACKEND_URL = "http://localhost:8080/telemetry"
 
-async def websocket_handler(websocket):
-    print("Client connected")
+def main():
 
-    clients.add(websocket)
-
-    try:
-        await websocket.wait_closed()
-
-    finally:
-        clients.discard(websocket)
-        print("Client disconnected")
-
-async def serial_reader():
+    print("Connecting to Arduino...")
 
     ser = serial.Serial(
         SERIAL_PORT,
@@ -28,29 +16,32 @@ async def serial_reader():
         timeout=1
     )
 
-    print("Connected to Arduino")
+    print("Connected.")
 
     while True:
 
         try:
 
-            if ser.in_waiting:
+            if not ser.in_waiting:
+                continue
 
-                line = ser.readline().decode(
-                    errors="ignore"
-                ).strip()
+            line = ser.readline().decode(
+                errors="ignore"
+            ).strip()
 
-                if not line:
-                    continue
+            if not line:
+                continue
+            print("RAW:", repr(line))
 
-                if line.startswith("time"):
-                    continue
+            if line.startswith("time"):
+                continue
 
-                parts = line.split(",")
+            parts = line.split(",")
 
-                if len(parts) != 7:
-                    continue
+            if len(parts) != 7:
+                continue
 
+            try:
                 data = {
                     "time": float(parts[0]),
                     "speed": float(parts[1]),
@@ -61,41 +52,24 @@ async def serial_reader():
                     "lon": float(parts[6])
                 }
 
-                message = json.dumps(data)
+            except ValueError:
+                print("BAD LINE:", repr(line))
+                continue
 
-                if clients:
+            response = requests.post(
+                BACKEND_URL,
+                json=data,
+                timeout=1
+            )
 
-                    await asyncio.gather(
-                        *[
-                            client.send(message)
-                            for client in clients.copy()
-                        ],
-                        return_exceptions=True
-                    )
-
-            await asyncio.sleep(0.001)
+            print("POST:", response.status_code)
 
         except Exception as e:
-            print("SERIAL ERROR:", e)
 
-async def main():
-
-    print("Starting WebSocket server...")
-
-    asyncio.create_task(
-        serial_reader()
-    )
-
-    async with serve(
-        websocket_handler,
-        "0.0.0.0",
-        8765
-    ):
-
-        print("WebSocket running")
-        print("Port: 8765")
-
-        await asyncio.Future()
+            print(
+                "ERROR:",
+                e
+            )
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
