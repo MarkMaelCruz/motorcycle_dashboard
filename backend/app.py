@@ -40,42 +40,31 @@ def stream():
 
         last_payload = ""
 
+        keepalive_counter = 0
+
         while True:
 
-            try:
+            payload = json.dumps(latest_data)
 
-                payload = json.dumps(latest_data)
+            if payload != last_payload:
 
-                if payload != last_payload:
+                yield f"data: {payload}\n\n"
 
-                    yield f"data: {payload}\n\n"
+                last_payload = payload
 
-                    last_payload = payload
+            keepalive_counter += 1
 
-                else:
+            if keepalive_counter >= 150:
 
-                    yield ": keepalive\n\n"
+                yield ": keepalive\n\n"
 
-                time.sleep(1)
+                keepalive_counter = 0
 
-            except GeneratorExit:
-
-                break
-
-            except Exception as e:
-
-                print("STREAM ERROR:", e)
-
-                break
+            time.sleep(0.1)
 
     return Response(
         event_stream(),
-        mimetype="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
-        }
+        mimetype="text/event-stream"
     )
 
 if __name__ == "__main__":

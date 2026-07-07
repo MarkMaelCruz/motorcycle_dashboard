@@ -110,7 +110,7 @@ def main():
                 session.post(
                     BACKEND_URL,
                     json=data,
-                    timeout=1
+                    timeout=5
                 )
 
         except Exception as e:
