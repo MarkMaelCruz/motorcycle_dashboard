@@ -8,4 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-CMD exec gunicorn --bind :8080 app:app
+CMD exec gunicorn \
+    --config gunicorn.conf.py \
+    --bind :8080 \
+    app:app
