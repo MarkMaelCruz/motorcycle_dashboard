@@ -1303,15 +1303,16 @@
     }
 
     // disabled demo telemetry
-    async function fetchTelemetry() {
+
+    const eventSource = new EventSource(
+      "https://motorcycle-telemetry-backend-112434217886.asia-southeast1.run.app/stream"
+    );
+
+    eventSource.onmessage = (event) => {
 
         try {
 
-            const response = await fetch(
-            "https://motorcycle-telemetry-backend-112434217886.asia-southeast1.run.app/latest"
-            );
-
-            const data = await response.json();
+            const data = JSON.parse(event.data);
 
             const speed = data.speed || 0;
             const lean = data.roll || 0;
@@ -1338,9 +1339,16 @@
 
         }
 
-    }
+    };
 
-    setInterval(fetchTelemetry, 100);
+        eventSource.onerror = (error) => {
+
+        console.error(
+          "SSE Error:",
+          error
+        );
+
+    };
                                         
 
     function makeSeriesData() {
