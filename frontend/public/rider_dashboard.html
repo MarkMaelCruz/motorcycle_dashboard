@@ -1307,8 +1307,17 @@
     const eventSource = new EventSource(
       "https://motorcycle-telemetry-backend-112434217886.asia-southeast1.run.app/stream"
     );
+
+    eventSource.onopen = () => {
+        console.log("SSE CONNECTED");
+    };
+
     eventSource.onmessage = (event) => {
-      console.log("SSE DATA:", event.data);
+        console.log("SSE DATA:", event.data);
+    };
+
+    eventSource.onerror = (event) => {
+        console.error("SSE ERROR:", event);
     };
 
     eventSource.onmessage = (event) => {
