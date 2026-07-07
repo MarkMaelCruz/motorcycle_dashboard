@@ -7,7 +7,7 @@ function App() {
     const timer = setInterval(async () => {
       try {
         const response = await fetch(
-          "http://localhost:8080/latest"
+          "https://motorcycle-telemetry-backend-112434217886.asia-southeast1.run.app/latest"
         );
 
         const data = await response.json();

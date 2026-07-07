@@ -4,7 +4,7 @@ import requests
 SERIAL_PORT = "/dev/ttyACM0"
 BAUD_RATE = 115200
 
-BACKEND_URL = "http://localhost:8080/telemetry"
+BACKEND_URL = "https://motorcycle-telemetry-backend-112434217886.asia-southeast1.run.app/telemetry"
 
 def main():
 
