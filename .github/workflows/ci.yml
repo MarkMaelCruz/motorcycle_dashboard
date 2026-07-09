@@ -1,0 +1,154 @@
+name: CI
+
+# WHEN THIS RUNS:
+# - Automatically on every pull request that targets "main"
+#   (this is what fires when you click "Compare & pull request")
+# - Automatically on every direct push to "main"
+# - Manually, if you click "Run workflow" on the Actions tab
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# If you push new commits to the same PR before the first run finishes,
+# cancel the old run instead of wasting minutes running both.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# The workflow only needs to read the repo, nothing else.
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------
+  # 1) BACKEND — installs backend/requirements.txt, lints with ruff,
+  #    then runs the pytest suite in backend/tests/
+  # ---------------------------------------------------------------
+  backend:
+    name: Backend (Flask)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Lint with ruff
+        run: ruff check .
+
+      - name: Run tests
+        run: pytest tests/ -v
+
+  # ---------------------------------------------------------------
+  # 2) FRONTEND — installs the exact locked deps, lints, and makes
+  #    sure the production build actually succeeds.
+  # ---------------------------------------------------------------
+  frontend:
+    name: Frontend (React + Vite)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+  # ---------------------------------------------------------------
+  # 3) CONTAINER — builds the exact Dockerfile Cloud Run uses, runs
+  #    it, and hits the health endpoint to prove the image actually
+  #    boots and serves traffic on port 8080.
+  # ---------------------------------------------------------------
+  docker:
+    name: Container (Docker build + smoke test)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker build -t motorcycle-telemetry-backend:ci ./backend
+
+      - name: Run container
+        run: docker run -d --name telemetry-test -p 8080:8080 motorcycle-telemetry-backend:ci
+
+      - name: Wait for container to become ready
+        run: |
+          for i in $(seq 1 10); do
+            if curl -sf http://localhost:8080/ > /dev/null; then
+              echo "Container is up"
+              exit 0
+            fi
+            echo "Waiting for container... ($i/10)"
+            sleep 2
+          done
+          echo "Container did not become ready in time"
+          docker logs telemetry-test
+          exit 1
+
+      - name: Verify health endpoint
+        run: |
+          response=$(curl -sf http://localhost:8080/)
+          echo "Response: $response"
+          echo "$response" | grep -q "Motorcycle Telemetry Backend Running"
+
+      - name: Show container logs
+        if: always()
+        run: docker logs telemetry-test
+
+      - name: Stop and remove container
+        if: always()
+        run: docker rm -f telemetry-test
+
+  # ---------------------------------------------------------------
+  # 4) SUMMARY — one single check to require in branch protection,
+  #    instead of having to select 3 separate jobs by name.
+  # ---------------------------------------------------------------
+  ci-summary:
+    name: All checks passed
+    if: always()
+    needs: [backend, frontend, docker]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any check failed
+        run: |
+          if [ "${{ needs.backend.result }}" != "success" ] || \
+             [ "${{ needs.frontend.result }}" != "success" ] || \
+             [ "${{ needs.docker.result }}" != "success" ]; then
+            echo "One or more checks failed."
+            exit 1
+          fi
+          echo "Backend, frontend, and container checks all passed."
