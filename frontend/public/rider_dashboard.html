@@ -920,6 +920,7 @@
         </div>
         <div class="controls">
           <span class="status-pill" id="statusPill"><span class="status-dot"></span><span id="statusText">Idle / Ready</span></span>
+          <span class="tag" id="ridingStateTag">Riding State: --</span>
           <button class="btn" id="startBtn">Start Session</button>
           <button class="btn secondary" id="endBtn">End Session</button>
           <button class="btn ghost" id="printBtn">Export View</button>
@@ -1344,6 +1345,24 @@
 
             document.getElementById("accelText").textContent =
             accel.toFixed(2) + " g";
+
+            // --- JOB B: riding control state -----------------------------
+            const ridingState = data.riding_state;
+            const ridingConfidence = data.riding_state_confidence;
+            const stateTag = document.getElementById("ridingStateTag");
+            if (stateTag) {
+                if (ridingState) {
+                    const confText =
+                        (typeof ridingConfidence === "number")
+                        ? ` (${Math.round(ridingConfidence * 100)}%)`
+                        : "";
+                    stateTag.textContent =
+                        `Riding State: ${ridingState}${confText}`;
+                } else {
+                    stateTag.textContent = "Riding State: --";
+                }
+            }
+            // ---------------------------------------------------------------
 
         } catch(error) {
 
