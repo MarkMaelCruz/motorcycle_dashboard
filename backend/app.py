@@ -92,7 +92,7 @@ def telemetry():
         "server_time": time.time(),
     }
  
-    return jsonify({"status": "ok"}), 200
+    return jsonify({"status": "received"}), 200
  
  
 @app.route("/latest")
