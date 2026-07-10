@@ -13,15 +13,33 @@ this change. This file has therefore been RECONSTRUCTED to match that
 documented behaviour, with the new JOB B classification step layered
 on top (see comments tagged "# --- JOB B").
 
-An earlier version of this reconstruction rebuilt the /latest response
-from a hardcoded list of field names ("time", "speed", "accel", "roll",
-"yaw", "lat", "lon"). That caused the existing JOB A test
-(test_telemetry_then_latest) to fail with "lat"/"lon" missing from the
-response, because it silently assumed a payload shape that didn't
-exactly match reality. POST /telemetry now instead stores the incoming
-JSON payload VERBATIM and only ADDS the new JOB B fields on top — it
-never renames or reconstructs anything — so nothing that worked before
-this change can regress, no matter the exact real payload shape.
+>>> WHY /latest AND /stream NOW RETURN DIFFERENT SHAPES <<<
+--------------------------------------------------------------
+The real, existing JOB A test (backend/tests/test_app.py,
+test_telemetry_then_latest) asserts:
+
+    latest_response = client.get("/latest")
+    assert latest_response.get_json() == payload
+
+That is a STRICT equality check against exactly what was POSTed to
+/telemetry — no extra keys allowed, ever. Two earlier attempts at this
+file broke that contract in different ways:
+  1. rebuilding /latest from a hardcoded field-name list (dropped
+     lat/lon for real payloads that didn't match the guess), then
+  2. merging the JOB B derived + classification fields directly into
+     /latest (technically preserved the raw fields, but added new
+     keys, which strict equality still rejects).
+
+The fix: /latest now stores and returns the POSTed payload completely
+untouched — JOB B never touches it. All of the new derived fields
+(acc_forward, lean_angle, lean_rate, throttle, brake, riding_state,
+riding_state_confidence) instead live ONLY in a second in-memory
+value that backs /stream, which is what rider_dashboard.html actually
+consumes via EventSource. JOB A's own test suite deliberately avoids
+asserting on /stream's body (see the original CI job description:
+"a /stream header/status check that deliberately avoids reading the
+response body"), so /stream is the correct, safe place for this to
+evolve without risking another regression here.
 
 BEFORE DEPLOYING: diff this against your real backend/app.py and port
 the JOB B blocks into your existing file instead of blindly
@@ -44,8 +62,13 @@ logger = logging.getLogger("motorcycle-backend")
 app = Flask(__name__)
 CORS(app)
 
+# --- JOB A: exactly what /latest returns. Never touched by JOB B. -----
 latest_data: dict = {}
-_feature_engineer = FeatureEngineer()   # --- JOB B (one bike per process today)
+
+# --- JOB B: raw + derived + classification fields, for /stream only ---
+latest_stream_data: dict = {}
+
+_feature_engineer = FeatureEngineer()   # one bike per process today
 
 KEEPALIVE_INTERVAL_S = 15
 
@@ -57,26 +80,22 @@ def health():
 
 @app.route("/telemetry", methods=["POST"])
 def telemetry():
-    global latest_data
+    global latest_data, latest_stream_data
 
     payload = request.get_json(force=True, silent=True) or {}
 
-    # --- JOB A behaviour, preserved byte-for-byte ---------------------
-    # Start from EXACTLY what was received. This guarantees every field
-    # the Pi sends (time, speed, accel, roll, yaw, lat, lon, or anything
-    # else) round-trips through GET /latest unchanged, regardless of
-    # what JOB B does below. This is what was previously broken: an
-    # earlier version of this file rebuilt the response from a
-    # hardcoded list of field names instead of passing the payload
-    # through, which silently dropped "lat"/"lon" for anyone whose
-    # real payload shape didn't match that hardcoded guess exactly.
-    merged = dict(payload)
+    # --- JOB A behaviour, preserved byte-for-byte, never modified ------
+    # latest_data is returned verbatim by GET /latest. JOB B must never
+    # add, remove, or rename a single key here.
+    latest_data = dict(payload)
 
     # --- JOB B: derive the 5 model features + classify (fail-soft) ----
-    # Wrapped in try/except on purpose: if anything here throws (bad
-    # payload shape, model not deployed yet, a math edge case), the
-    # raw telemetry above must still be stored and returned. JOB B is
-    # additive only — it must never be able to take down /telemetry.
+    # This builds a SEPARATE dict for /stream only. Wrapped in
+    # try/except on purpose: if anything here throws (bad payload
+    # shape, model not deployed yet, a math edge case), /latest above
+    # is already safely stored, and /stream just falls back to raw
+    # telemetry with riding_state: None instead of crashing the request.
+    stream_payload = dict(payload)
     try:
         raw = RawSample(
             time=float(payload.get("time", 0.0)),
@@ -95,7 +114,7 @@ def telemetry():
             throttle=features.throttle,
             brake=features.brake,
         )
-        merged.update({
+        stream_payload.update({
             "acc_forward": features.acc_forward,
             "lean_angle": features.lean_angle,
             "lean_rate": features.lean_rate,
@@ -107,34 +126,40 @@ def telemetry():
     except Exception as exc:  # noqa: BLE001 - JOB B must fail soft, always
         logger.warning(
             "JOB B feature engineering / classification step failed; "
-            "raw telemetry was still stored unchanged: %s", exc
+            "/latest is unaffected, /stream falls back to raw telemetry: %s",
+            exc,
         )
-        merged.setdefault("riding_state", None)
-        merged.setdefault("riding_state_confidence", None)
+        stream_payload.setdefault("riding_state", None)
+        stream_payload.setdefault("riding_state_confidence", None)
 
-    merged["server_time"] = time.time()
-    latest_data = merged
+    stream_payload["server_time"] = time.time()
+    latest_stream_data = stream_payload
 
     return jsonify({"status": "received"}), 200
 
 
 @app.route("/latest")
 def latest():
+    """Byte-exact echo of the last POSTed payload. JOB A contract — do
+    not add fields here; add them to latest_stream_data / /stream
+    instead."""
     return jsonify(latest_data)
 
 
 @app.route("/stream")
 def stream():
-    """Server-Sent Events endpoint, Cloud Run compatible."""
+    """Server-Sent Events endpoint, Cloud Run compatible. Carries raw
+    telemetry PLUS the JOB B derived + classification fields — this is
+    what rider_dashboard.html's EventSource actually listens to."""
 
     def event_stream():
         last_sent = None
         last_keepalive = time.time()
         while True:
             now = time.time()
-            if latest_data and latest_data != last_sent:
-                yield f"data: {json.dumps(latest_data)}\n\n"
-                last_sent = dict(latest_data)
+            if latest_stream_data and latest_stream_data != last_sent:
+                yield f"data: {json.dumps(latest_stream_data)}\n\n"
+                last_sent = dict(latest_stream_data)
                 last_keepalive = now
             elif now - last_keepalive > KEEPALIVE_INTERVAL_S:
                 yield ": keepalive\n\n"
