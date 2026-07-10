@@ -115,7 +115,7 @@ def telemetry():
     merged["server_time"] = time.time()
     latest_data = merged
 
-    return jsonify({"status": "ok"}), 200
+    return jsonify({"status": "received"}), 200
 
 
 @app.route("/latest")
