@@ -78,6 +78,15 @@ def health():
     return "Motorcycle Telemetry Backend Running"
 
 
+@app.route("/debug/model-status")
+def debug_model_status():
+    """Diagnostic endpoint added to find exactly why riding_state was
+    showing as null in production. Safe to leave in permanently (no
+    secrets returned), or remove once the root cause is confirmed —
+    see README.md for the removal note."""
+    return jsonify(classifier.status())
+
+
 @app.route("/telemetry", methods=["POST"])
 def telemetry():
     global latest_data, latest_stream_data
