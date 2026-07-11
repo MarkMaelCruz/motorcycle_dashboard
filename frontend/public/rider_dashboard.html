@@ -1328,23 +1328,60 @@
             const data = JSON.parse(event.data);
 
             const speed = data.speed || 0;
-            const lean = data.roll || 0;
             const accel = data.accel || 0;
 
-            const throttle =
-            Math.max(0, Math.min(100, accel * 100));
-
-            const brake =
-            Math.max(0, Math.min(100, -accel * 100));
+            // --- JOB C: use backend-derived features, not raw/dead values ---
+            // data.roll is raw lateral g (NOT degrees) and was never a valid
+            // lean angle to display directly. data.lean_angle (degrees) and
+            // data.throttle / data.brake (0-100 percent) are computed
+            // server-side in feature_engineering.py and already ride along
+            // on every /stream payload (see backend/app.py, JOB B). Default
+            // to 0 if a payload doesn't have them yet (older backend cached
+            // in the browser, or the model bundle isn't deployed yet).
+            const leanAngle = (typeof data.lean_angle === "number") ? data.lean_angle : 0;
+            const throttle  = (typeof data.throttle === "number") ? data.throttle : 0;
+            const brake     = (typeof data.brake === "number") ? data.brake : 0;
 
             document.getElementById("speedValue").textContent =
             Math.round(speed);
 
+            document.getElementById("speedGauge").style.setProperty(
+            "--gauge-deg",
+            `${Math.max(0, Math.min(280, speed / 120 * 280))}deg`
+            );
+
             document.getElementById("leanText").textContent =
-            lean.toFixed(0) + "�";
+            leanAngle.toFixed(0) + "°";
 
             document.getElementById("accelText").textContent =
             accel.toFixed(2) + " g";
+
+            document.getElementById("throttleText").textContent =
+            Math.round(throttle) + "%";
+
+            document.getElementById("brakeText").textContent =
+            Math.round(brake) + "%";
+
+            document.getElementById("throttleBar").style.setProperty("--w", `${throttle}%`);
+            document.getElementById("brakeBar").style.setProperty("--w", `${brake}%`);
+            document.getElementById("leanBar").style.setProperty(
+            "--w",
+            `${Math.min(100, Math.abs(leanAngle) / 45 * 100)}%`
+            );
+            document.getElementById("accelBar").style.setProperty(
+            "--w",
+            `${Math.min(100, Math.abs(accel) / 0.6 * 100)}%`
+            );
+
+            const bikeIcon = document.getElementById("bikeIcon");
+            if (bikeIcon) bikeIcon.style.setProperty("--lean-rot", `${leanAngle}deg`);
+
+            const leanStateEl = document.getElementById("leanState");
+            if (leanStateEl) {
+                leanStateEl.textContent =
+                    Math.abs(leanAngle) < 6 ? "Neutral" : (leanAngle > 0 ? "Right lean" : "Left lean");
+            }
+            // -----------------------------------------------------------------
 
             // --- JOB B: riding control state -----------------------------
             const ridingState = data.riding_state;
