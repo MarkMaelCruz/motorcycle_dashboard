@@ -188,7 +188,7 @@ class FeatureEngineer:
         # No physical throttle/brake sensor exists yet, so these are
         # estimated purely from forward/back acceleration.
         if raw.accel_lon >= 0:
-            throttle = _clamp(raw.accel_lon / MAX_THROTTLE_ACCEL_G, 0.0, 1.0) *2 * 100.0
+            throttle = _clamp(raw.accel_lon / MAX_THROTTLE_ACCEL_G, 0.0, 1.0) * 100.0
             brake = 0.0
         else:
             throttle = 0.0
