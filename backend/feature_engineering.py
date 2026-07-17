@@ -74,7 +74,7 @@ logger = logging.getLogger("feature_engineering")
 # Retune once real throttle/brake sensors land (see project roadmap).
 
 MAX_LEAN_G = 1.0               # accY magnitude treated as ~90 deg lean (clamped)
-MAX_THROTTLE_ACCEL_G = 0.35    # forward accel (g) mapped to 100% throttle proxy
+MAX_THROTTLE_ACCEL_G = 0.70    # forward accel (g) mapped to 100% throttle proxy
 MAX_BRAKE_ACCEL_G = 0.45       # forward decel (g) mapped to 100% brake proxy
 
 # --- JOB D: plausibility-guard constants ---------------------------------
@@ -188,7 +188,7 @@ class FeatureEngineer:
         # No physical throttle/brake sensor exists yet, so these are
         # estimated purely from forward/back acceleration.
         if raw.accel_lon >= 0:
-            throttle = (_clamp(raw.accel_lon / MAX_THROTTLE_ACCEL_G, 0.0, 1.0)/ 2) * 100.0
+            throttle = _clamp(raw.accel_lon / MAX_THROTTLE_ACCEL_G, 0.0, 1.0) *2 * 100.0
             brake = 0.0
         else:
             throttle = 0.0
