@@ -105,6 +105,7 @@ class RawSample:
     yaw_rate: float       # deg/s          (posted as "yaw")
     lat: float = 0.0
     lon: float = 0.0
+    brake: Optional[float] = None
 
 
 @dataclass
@@ -185,14 +186,20 @@ class FeatureEngineer:
         self._prev_time = raw.time
 
         # --- throttle / brake proxies (percent, 0-100) --------------------
-        # No physical throttle/brake sensor exists yet, so these are
-        # estimated purely from forward/back acceleration.
-        if raw.accel_lon >= 0:
-            throttle = _clamp(raw.accel_lon / MAX_THROTTLE_ACCEL_G, 0.0, 1.0) * 100.0
+        # Prefer an explicit brake percentage from the source device when
+        # available. Fall back to the old acceleration-based proxy only if
+        # no brake value was supplied.
+        if raw.brake is not None:
+            brake = _clamp(float(raw.brake), 0.0, 100.0)
+        elif raw.accel_lon >= 0:
             brake = 0.0
         else:
-            throttle = 0.0
             brake = _clamp(-raw.accel_lon / MAX_BRAKE_ACCEL_G, 0.0, 1.0) * 100.0
+
+        if raw.accel_lon >= 0:
+            throttle = _clamp(raw.accel_lon / MAX_THROTTLE_ACCEL_G, 0.0, 1.0) * 100.0
+        else:
+            throttle = 0.0
 
         return DerivedFeatures(
             acc_forward=raw.accel_lon,

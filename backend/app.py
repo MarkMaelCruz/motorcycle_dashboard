@@ -114,6 +114,7 @@ def telemetry():
             yaw_rate=float(payload.get("yaw", 0.0)),
             lat=float(payload.get("lat", 0.0)),
             lon=float(payload.get("lon", 0.0)),
+            brake=(payload.get("brake") if "brake" in payload else None),
         )
         features = _feature_engineer.compute(raw)
         result = classifier.classify(
