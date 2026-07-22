@@ -4,6 +4,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
+import app as app_module
 from app import app as flask_app
 
 
@@ -49,3 +50,22 @@ def test_stream_endpoint_is_sse(client):
     assert response.status_code == 200
     assert response.mimetype == "text/event-stream"
     response.close()
+
+
+def test_telemetry_uses_incoming_brake_value(client):
+    payload = {
+        "time": 12.52,
+        "speed": 25.6,
+        "accel": -0.042,
+        "roll": 3.2,
+        "yaw": 1.1,
+        "lat": 14.599512,
+        "lon": 121.036192,
+        "brake": 67.5,
+    }
+
+    response = client.post("/telemetry", json=payload)
+    assert response.status_code == 200
+
+    latest_stream = app_module.latest_stream_data
+    assert latest_stream["brake"] == 67.5
