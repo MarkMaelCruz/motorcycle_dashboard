@@ -5,9 +5,20 @@ Single source of truth for turning RAW Arduino telemetry into the
 5 features the riding-control classifier (lgbm_model_bundle.pkl)
 expects.
 
+--- JOB E ADDENDUM --------------------------------------------------------
+A real throttle-position sensor now exists (a second MPU6050, latched to
+the throttle tube, I2C address 0x68). The Arduino sketch calibrates and
+smooths it on-device and emits it as a 0-100 "throttle" field, exactly the
+same way "brake" has worked since the VL53L0X was added. RawSample now
+carries an optional `throttle` field; when present it is used directly
+(clamped to 0-100) instead of the old forward-acceleration proxy. The
+proxy remains as a fallback for payloads that don't include it yet (e.g.
+older firmware, or replaying old recorded logs).
+---------------------------------------------------------------------------
+
 WHY THIS FILE EXISTS
 ---------------------
-The Arduino (raw .ino) only ever transmits 7 raw fields:
+The Arduino (raw .ino) only ever transmitted 7 raw fields historically:
 
     time, speed, accel_lon, roll, yaw_rate, lat, lon
 
@@ -20,43 +31,14 @@ The Arduino (raw .ino) only ever transmits 7 raw fields:
                 dashboard.
 - yaw_rate   -> gyroscope Z-axis rate in deg/s (bias-corrected on the MCU)
 
-The trained model, however, expects:
+The trained model expects:
 
     acc_forward, lean_angle, lean_rate, throttle, brake
 
-None of those 5 columns exist on the hardware today:
-  * lean_angle / lean_rate must be DERIVED from the raw lateral-g reading.
-  * throttle / brake sensors do not physically exist on the bike yet
-    (see project docs, "Future sensors"). Their values are ESTIMATED
-    (proxied) from forward acceleration: positive accel behaves like
-    throttle, negative accel behaves like braking.
-
-This is exactly why raspberry_pi/serial_bridge.py (which only forwards
-raw values) looked "dead" online while rider_control_classification.py
-(which computed these derived features locally before calling the
-model) looked "alive". This module centralises that derivation so the
-SAME logic runs in exactly one place going forward: the Cloud Run
-backend, on every POST /telemetry.
-
---- JOB D ADDENDUM -------------------------------------------------------
-A separate bug (fixed at the source, in the .ino's calibration timing -
-see Project Context Handoff, JOB D) previously caused "bias-corrected"
-raw values to carry a large, sustained, physically implausible offset
-(e.g. sustained ~0.44g accel_lon and ~1.11g roll while the bike sat
-completely still). That is NOT sensor noise and a noise deadzone would
-not have fixed it - the offset was tightly banded around a wrong
-non-zero value, not jittering around zero. The real fix lives on the
-Arduino: calibration now waits for the device to be physically stable
-before it locks in "zero", and can be re-triggered on demand.
-
-This file adds a belt-and-suspenders defensive check ONLY: if a raw
-reading is ever physically implausible for a motorcycle at rest/normal
-riding (e.g. sustained lateral g near the +-1.0g clamp ceiling, which
-would mean gravity is being read as fully sideways), it's flagged
-rather than silently reported as a confident 90-degree lean or 100%
-throttle. This does not attempt to correct a miscalibration in
-software - see the .ino fix for that - it only stops a miscalibration
-from masquerading as normal telemetry.
+lean_angle / lean_rate are DERIVED from the raw lateral-g reading.
+brake and (as of JOB E) throttle now come from real, calibrated
+on-device sensors (VL53L0X TOF and a second MPU6050, respectively) and
+are passed straight through here rather than estimated.
 """
 
 from __future__ import annotations
@@ -69,24 +51,12 @@ from typing import Optional
 logger = logging.getLogger("feature_engineering")
 
 # ---- Tunable constants -------------------------------------------------
-# Starting points based on the sensor's g-range and values observed
-# during the first test rides (rider_control_classification.py).
-# Retune once real throttle/brake sensors land (see project roadmap).
-
 MAX_LEAN_G = 1.0               # accY magnitude treated as ~90 deg lean (clamped)
-MAX_THROTTLE_ACCEL_G = 0.70    # forward accel (g) mapped to 100% throttle proxy
-MAX_BRAKE_ACCEL_G = 0.45       # forward decel (g) mapped to 100% brake proxy
+MAX_THROTTLE_ACCEL_G = 0.70    # forward accel (g) mapped to 100% throttle proxy (fallback only)
+MAX_BRAKE_ACCEL_G = 0.45       # forward decel (g) mapped to 100% brake proxy (fallback only)
 
 # --- JOB D: plausibility-guard constants ---------------------------------
-# A real motorcycle at normal riding lean rarely exceeds ~45 deg
-# (~0.7g lateral); a value this close to the 1.0g clamp ceiling for a
-# SUSTAINED period (not a single noisy tick) is far more likely to be
-# a bad calibration offset than a real, physically extreme lean.
 PLAUSIBLE_LEAN_G_CEILING = 0.85          # ~58 deg - beyond this, flag as suspect
-# A held forward/back accel this large for a sustained period while
-# GPS speed is not changing accordingly is a strong bias-offset signal
-# (this is exactly the pattern that surfaced the JOB D bug: ~0.44g
-# held for 5+ seconds with speed locked at 6.26 km/h the whole time).
 PLAUSIBLE_ACCEL_G_CEILING = 0.6
 STATIONARY_SPEED_KMPH = 1.0              # GPS speed below this = "not really moving"
 
@@ -106,16 +76,14 @@ class RawSample:
     lat: float = 0.0
     lon: float = 0.0
     brake: Optional[float] = None
+    throttle: Optional[float] = None   # --- JOB E: real throttle-position sensor
 
 
 @dataclass
 class DerivedFeatures:
     """Exactly the 5 columns the model bundle's feature_cols expects,
     plus an optional diagnostic flag that is NOT one of the 5 model
-    features (see classifier.classify(), which only ever reads the
-    5 named args) and is safe for app.py to include in
-    latest_stream_data or ignore entirely without affecting JOB A's
-    /latest contract."""
+    features."""
     acc_forward: float
     lean_angle: float
     lean_rate: float
@@ -126,8 +94,7 @@ class DerivedFeatures:
 
 def _check_plausibility(raw: RawSample) -> Optional[str]:
     """Flags (does not correct) readings consistent with a bad/stale
-    accelerometer calibration rather than real rider input. See the
-    JOB D module docstring for the reasoning."""
+    accelerometer calibration rather than real rider input."""
     if abs(raw.roll) >= PLAUSIBLE_LEAN_G_CEILING:
         return (
             f"roll={raw.roll:.3f}g exceeds plausible lean ceiling "
@@ -147,11 +114,7 @@ def _check_plausibility(raw: RawSample) -> Optional[str]:
 class FeatureEngineer:
     """
     Stateful because lean_rate needs the previous lean_angle + dt.
-
-    Keep ONE instance per logical bike/stream. The default backend
-    integration keeps a single process-wide instance because the
-    system currently tracks one active bike (see project docs,
-    "multi-session analytics" is a future feature).
+    Keep ONE instance per logical bike/stream.
     """
 
     def __init__(self) -> None:
@@ -163,15 +126,11 @@ class FeatureEngineer:
         self._prev_time = None
 
     def compute(self, raw: RawSample) -> DerivedFeatures:
-        # --- JOB D: plausibility guard (diagnostic only, no correction) --
         sensor_flag = _check_plausibility(raw)
         if sensor_flag:
             logger.warning("Implausible raw telemetry: %s", sensor_flag)
 
         # --- lean angle (deg) -------------------------------------------
-        # accY (raw.roll) is lateral g. With gravity ~1g on the vertical
-        # axis at rest, lean angle ~= asin(lateral_g / 1g). The ratio is
-        # clamped to [-1, 1] before asin() to survive noisy ticks.
         ratio = _clamp(raw.roll / MAX_LEAN_G, -1.0, 1.0)
         lean_angle = math.degrees(math.asin(ratio))
 
@@ -185,10 +144,7 @@ class FeatureEngineer:
         self._prev_lean_angle = lean_angle
         self._prev_time = raw.time
 
-        # --- throttle / brake proxies (percent, 0-100) --------------------
-        # Prefer an explicit brake percentage from the source device when
-        # available. Fall back to the old acceleration-based proxy only if
-        # no brake value was supplied.
+        # --- brake percent: prefer real sensor value, fallback to proxy ---
         if raw.brake is not None:
             brake = _clamp(float(raw.brake), 0.0, 100.0)
         elif raw.accel_lon >= 0:
@@ -196,7 +152,10 @@ class FeatureEngineer:
         else:
             brake = _clamp(-raw.accel_lon / MAX_BRAKE_ACCEL_G, 0.0, 1.0) * 100.0
 
-        if raw.accel_lon >= 0:
+        # --- throttle percent: prefer real sensor value (JOB E), fallback to proxy ---
+        if raw.throttle is not None:
+            throttle = _clamp(float(raw.throttle), 0.0, 100.0)
+        elif raw.accel_lon >= 0:
             throttle = _clamp(raw.accel_lon / MAX_THROTTLE_ACCEL_G, 0.0, 1.0) * 100.0
         else:
             throttle = 0.0

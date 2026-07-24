@@ -101,8 +101,8 @@ def classify(acc_forward: float, lean_angle: float, lean_rate: float,
         }
         X = [[row[c] for c in feature_cols]]
 
-        pred = model.predict(X)
-        label = le.inverse_transform(pred)[0]
+        _pred = model.predict(X)
+        _label = le.inverse_transform(pred)[0]
 
         confidence = None
         if hasattr(model, "predict_proba"):
@@ -112,8 +112,49 @@ def classify(acc_forward: float, lean_angle: float, lean_rate: float,
             except Exception:  # noqa: BLE001
                 confidence = None
 
+        #_last_classify_error = None
+        #return {"label": str(label), "confidence": confidence}
+
+        # --- tunable thresholds ---
+        SPEED_STOP_EPS         = 0.5   # km/h; speed at/below this = Stop
+        ACC_TREND_EPS          = 0.15  # |acc_forward|; below this treated as "constant speed"
+        LEAN_FLAT_EPS          = 3.0   # degrees; below this, treated as "not leaning"
+        LEAN_RATE_FLAT_EPS     = 1.0   # deg/s; below this, treated as "lean not changing"
+        THROTTLE_STRAIGHT_MIN  = 70.0  # %
+        BRAKE_ZERO_EPS         = 1.0   # %
+
+        speed_increasing = acc_forward > ACC_TREND_EPS
+        speed_decreasing = acc_forward < -ACC_TREND_EPS
+        speed_constant   = not speed_increasing and not speed_decreasing
+
+        leaning = abs(lean_angle) > LEAN_FLAT_EPS
+        # lean_angle and lean_rate having opposite signs means the lean
+        # is moving back toward 0 (Curve Exit); same sign means it's
+        # deepening further away from 0 (Curve Entry).
+        lean_returning_to_zero = (lean_angle * lean_rate) < 0 and abs(lean_rate) > LEAN_RATE_FLAT_EPS
+        lean_deepening          = (lean_angle * lean_rate) > 0 and abs(lean_rate) > LEAN_RATE_FLAT_EPS
+        lean_steady             = abs(lean_rate) <= LEAN_RATE_FLAT_EPS
+
+        no_brake = brake <= BRAKE_ZERO_EPS
+        braking  = brake > BRAKE_ZERO_EPS
+
+        if speed <= SPEED_STOP_EPS:
+            label = "Stop"
+        elif speed_increasing and throttle > THROTTLE_STRAIGHT_MIN and no_brake:
+            label = "Straight"
+        elif speed_decreasing and braking and lean_deepening:
+            label = "Curve Entry"
+        elif speed_constant and leaning and lean_returning_to_zero:
+            label = "Curve Exit"
+        elif speed_constant and leaning and lean_steady:
+            label = "Curve"
+        elif speed_constant and not leaning and no_brake:
+            label = "Cruising"
+        else:
+            label = "Cruising"  # ambiguous/fallback case
+
         _last_classify_error = None
-        return {"label": str(label), "confidence": confidence}
+        return {"label": label, "confidence": confidence}
 
     except Exception as exc:  # noqa: BLE001 - classify() must also fail soft
         _last_classify_error = f"{type(exc).__name__}: {exc}"

@@ -52,7 +52,9 @@ def main():
                 if line.startswith("time"):
                     continue
                 parts = line.split(",")
-                if len(parts) != 8:
+                # --- JOB E: sketch now emits an extra "throttle" column ---
+                # time,speed,accel_lon,roll,yaw_rate,lat,lon,brake,throttle
+                if len(parts) != 9:
                     continue
                 try:
                     data = {
@@ -64,6 +66,7 @@ def main():
                         "lat": float(parts[5]),
                         "lon": float(parts[6]),
                         "brake": float(parts[7]),
+                        "throttle": float(parts[8]),
                     }
                 except ValueError:
                     print("Bad line:", line)
@@ -86,7 +89,8 @@ def main():
                         f"speed={data['speed']} "
                         f"accel={data['accel']} "
                         f"roll={data['roll']} "
-                        f"brake={data['brake']}"
+                        f"brake={data['brake']} "
+                        f"throttle={data['throttle']}"
                     )
                 except requests.exceptions.RequestException as e:
                     print(f"POST FAILED: {e}")
