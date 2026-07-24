@@ -1,5 +1,6 @@
 import asyncio
 import json
+
 import serial
 from websockets.asyncio.server import serve
 
@@ -75,7 +76,7 @@ async def serial_reader():
 
             await asyncio.sleep(0.001)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — intentional: keep websocket loop alive on serial errors
             print("SERIAL ERROR:", e)
 
 async def main():

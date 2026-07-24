@@ -13,6 +13,6 @@ while True:
         msg = ws.recv()
         print(msg)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — test script, broad catch is fine here
         print("ERROR:", e)
         break
