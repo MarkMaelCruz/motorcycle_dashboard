@@ -11,6 +11,15 @@ RawSample so feature_engineering.py can use the real value instead of its
 old acceleration-based proxy. /latest's byte-exact JOB A contract is
 unaffected either way - it already stores/returns the payload verbatim.
 ---------------------------------------------------------------------------
+
+--- BUGFIX (riding_state always null) --------------------------------------
+classifier.classify() was being called with `speed=features.speed`, but
+`DerivedFeatures` (feature_engineering.py) has no `speed` attribute - only
+`RawSample` does. That raised an AttributeError on every single request,
+which the JOB B fail-soft try/except silently swallowed, forcing
+riding_state to None on every telemetry POST regardless of actual
+conditions. Fixed by reading speed from `raw` (the RawSample) instead.
+---------------------------------------------------------------------------
 """
 
 import json
@@ -80,7 +89,7 @@ def telemetry():
             lean_rate=features.lean_rate,
             throttle=features.throttle,
             brake=features.brake,
-            speed=features.speed
+            speed=raw.speed,  # --- BUGFIX: was features.speed, which doesn't exist
         )
         stream_payload.update({
             "acc_forward": features.acc_forward,
