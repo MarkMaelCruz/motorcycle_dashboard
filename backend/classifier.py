@@ -75,7 +75,7 @@ def status() -> dict:
 
 
 def classify(acc_forward: float, lean_angle: float, lean_rate: float,
-             throttle: float, brake: float) -> Optional[dict]:
+             throttle: float, brake: float, speed: float) -> Optional[dict]:
     """
     Returns {"label": str, "confidence": float | None} or None if the
     model bundle is unavailable (e.g. not yet deployed to backend/model/)
@@ -102,7 +102,7 @@ def classify(acc_forward: float, lean_angle: float, lean_rate: float,
         X = [[row[c] for c in feature_cols]]
 
         _pred = model.predict(X)
-        _label = le.inverse_transform(pred)[0]
+        _label = le.inverse_transform(_pred)[0]
 
         confidence = None
         if hasattr(model, "predict_proba"):
