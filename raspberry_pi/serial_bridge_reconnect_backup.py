@@ -1,7 +1,13 @@
-import serial
-import requests
-import time
 import glob
+import time
+
+import requests
+import serial
+
+
+class SerialDeviceNotFoundError(Exception):
+    """Raised when no Arduino serial device can be found."""
+
 session = requests.Session()
 
 BAUD_RATE = 115200
@@ -10,7 +16,7 @@ def find_arduino_port():
     ports = sorted(glob.glob("/dev/ttyACM*"))
 
     if not ports:
-        raise Exception(
+        raise SerialDeviceNotFoundError(
             "No Arduino serial device found."
         )
 
@@ -85,7 +91,7 @@ def main():
 
             last_send_time = current_time
 
-            response = session.post(
+            session.post(
                 BACKEND_URL,
                 json=data,
                 timeout=1
@@ -93,7 +99,7 @@ def main():
 
             #print("POST:", response.status_code)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — intentional: reconnect loop must survive any failure
 
             print(
                 "ERROR:",

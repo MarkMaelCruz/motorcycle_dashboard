@@ -1,7 +1,8 @@
-import serial
-import requests
-import time
 import glob
+import time
+
+import requests
+import serial
 
 SERIAL_PORT_PATTERN = "/dev/ttyACM*"
 BAUD_RATE = 115200
@@ -14,11 +15,13 @@ SEND_INTERVAL = 0.10  # seconds (10 Hz)
 last_send_time = 0
 session = requests.Session()
 
+class SerialDeviceNotFoundError(Exception):
+    """Raised when no Arduino serial device can be found."""
 
 def find_arduino_port():
     ports = sorted(glob.glob(SERIAL_PORT_PATTERN))
     if not ports:
-        raise Exception("No Arduino serial device found.")
+        raise SerialDeviceNotFoundError("No Arduino serial device found.")
     print(f"Using serial port: {ports[0]}")
     return ports[0]
 
@@ -94,13 +97,13 @@ def main():
                     )
                 except requests.exceptions.RequestException as e:
                     print(f"POST FAILED: {e}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — intentional: reconnect loop must survive any failure
             print(f"CONNECTION LOST: {e}")
             if ser is not None:
                 try:
                     ser.close()
-                except:
-                    pass
+                except OSError as e:
+                    print(f"Error closing serial port: {e}")
             print("Retrying in 3 seconds...")
             time.sleep(3)
 

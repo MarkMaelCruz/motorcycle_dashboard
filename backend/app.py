@@ -13,15 +13,14 @@ unaffected either way - it already stores/returns the payload verbatim.
 ---------------------------------------------------------------------------
 """
 
-import time
 import json
 import logging
+import time
 
-from flask import Flask, request, jsonify, Response
+import classifier  # --- JOB B
+from feature_engineering import FeatureEngineer, RawSample  # --- JOB B
+from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
-
-from feature_engineering import FeatureEngineer, RawSample   # --- JOB B
-import classifier                                              # --- JOB B
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("motorcycle-backend")

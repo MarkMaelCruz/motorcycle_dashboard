@@ -15,10 +15,9 @@ but is safe to import inside a web server:
     joblib.load() cost once per container instance
 """
 
+import logging
 import os
 import traceback
-import logging
-from typing import Optional
 
 logger = logging.getLogger("classifier")
 
@@ -29,8 +28,8 @@ MODEL_PATH = os.environ.get(
 
 _bundle = None
 _load_attempted = False
-_load_error: Optional[str] = None          # --- diagnostics
-_last_classify_error: Optional[str] = None  # --- diagnostics
+_load_error: str | None = None          # --- diagnostics
+_last_classify_error: str | None = None  # --- diagnostics
 
 
 def _load_bundle():
@@ -41,9 +40,9 @@ def _load_bundle():
     try:
         import joblib
         bundle = joblib.load(MODEL_PATH)
-        bundle["label_encoder"].classes_  # raises AttributeError if unfitted
-        bundle["model"]                    # raises KeyError if bundle shape is wrong
-        bundle["feature_cols"]             # raises KeyError if bundle shape is wrong
+        _ = bundle["label_encoder"].classes_  # raises AttributeError if unfitted
+        _ = bundle["model"]                    # raises KeyError if bundle shape is wrong
+        _ = bundle["feature_cols"]             # raises KeyError if bundle shape is wrong
         _bundle = bundle
         _load_error = None
         logger.info(
@@ -75,7 +74,7 @@ def status() -> dict:
 
 
 def classify(acc_forward: float, lean_angle: float, lean_rate: float,
-             throttle: float, brake: float, speed: float) -> Optional[dict]:
+             throttle: float, brake: float, speed: float) -> dict | None:
     """
     Returns {"label": str, "confidence": float | None} or None if the
     model bundle is unavailable (e.g. not yet deployed to backend/model/)

@@ -46,7 +46,6 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
-from typing import Optional
 
 logger = logging.getLogger("feature_engineering")
 
@@ -75,8 +74,8 @@ class RawSample:
     yaw_rate: float       # deg/s          (posted as "yaw")
     lat: float = 0.0
     lon: float = 0.0
-    brake: Optional[float] = None
-    throttle: Optional[float] = None   # --- JOB E: real throttle-position sensor
+    brake: float | None = None
+    throttle: float | None = None   # --- JOB E: real throttle-position sensor
 
 
 @dataclass
@@ -89,10 +88,10 @@ class DerivedFeatures:
     lean_rate: float
     throttle: float
     brake: float
-    sensor_flag: Optional[str] = None   # --- JOB D, diagnostic only
+    sensor_flag: str | None = None   # --- JOB D, diagnostic only
 
 
-def _check_plausibility(raw: RawSample) -> Optional[str]:
+def _check_plausibility(raw: RawSample) -> str | None:
     """Flags (does not correct) readings consistent with a bad/stale
     accelerometer calibration rather than real rider input."""
     if abs(raw.roll) >= PLAUSIBLE_LEAN_G_CEILING:
@@ -118,8 +117,8 @@ class FeatureEngineer:
     """
 
     def __init__(self) -> None:
-        self._prev_lean_angle: Optional[float] = None
-        self._prev_time: Optional[float] = None
+        self._prev_lean_angle: float | None = None
+        self._prev_time: float | None = None
 
     def reset(self) -> None:
         self._prev_lean_angle = None
